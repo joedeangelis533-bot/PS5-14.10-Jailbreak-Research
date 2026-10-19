@@ -172,18 +172,20 @@ def parse_query(data):
 
 
 def build_response(qid, question_bytes, ip=None):
-    """Build a DNS response. With ip -> one A record; without -> NXDOMAIN."""
+    """With ip, return matching A records or NODATA; without, NXDOMAIN."""
+    answer = b""
     if ip is None:
         flags = 0x8183  # QR + RD + RA + NXDOMAIN
-        answer = b""
     else:
         flags = 0x8180  # QR + RD + RA
-        answer = (
-            b"\xc0\x0c"
-            + struct.pack(">HHIH", 1, 1, DEFAULT_TTL, 4)
-            + socket.inet_aton(ip)
-        )
-    header = struct.pack(">HHHHHH", qid, flags, 1, 1 if ip else 0, 0, 0)
+        qtype, qclass = struct.unpack(">HH", question_bytes[-4:])
+        if qtype in (1, 255) and qclass in (1, 255):
+            answer = (
+                b"\xc0\x0c"
+                + struct.pack(">HHIH", 1, 1, DEFAULT_TTL, 4)
+                + socket.inet_aton(ip)
+            )
+    header = struct.pack(">HHHHHH", qid, flags, 1, int(bool(answer)), 0, 0)
     return header + question_bytes + answer
 
 
