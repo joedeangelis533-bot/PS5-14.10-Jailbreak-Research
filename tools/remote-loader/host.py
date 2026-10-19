@@ -245,8 +245,18 @@ class GuideHandler(SimpleHTTPRequestHandler):
         a cert error or a blank page you need to know whether the request
         arrived at all. This is the line that answers that.
         """
-        agent = self.headers.get("User-Agent", "-")
-        say(style(f"[HTTP] {self.command} {self.path} -> {code}  UA: {agent[:60]}", 36))
+        agent = getattr(self, "headers", {}).get("User-Agent", "-")
+        path = getattr(self, "path", "-")
+        say(style(f"[HTTP] {self.command} {path} -> {code}  UA: {agent[:60]}", 36))
+
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        if not self._host_allowed():
+            self.send_error(403, "Host not allowed")
+            self._log(f"{self.command} -> REJECTED (host mismatch)", error=True)
+            return False
+        return True
 
     def _relative_path(self):
         """Request path, normalized and docroot-relative ('' for root).
