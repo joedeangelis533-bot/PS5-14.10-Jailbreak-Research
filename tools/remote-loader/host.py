@@ -337,15 +337,9 @@ class GuideHandler(SimpleHTTPRequestHandler):
         host = self.headers.get("Host", "").split(":", 1)[0].strip().lower()
         return host == self.allowed_host
 
-    def do_POST(self):
-        """Crash-safe beacon sink: logs every POST to host-beacons.log + 204.
-
-        Used by liveness tests (CVE-2026-43705 PoC etc.): the page beacons a
-        unique path per event; the log line is the wire-visible signature.
-        """
+    def _record_beacon(self, body):
+        """Append a probe event using the existing POST beacon log format."""
         raw = self.path.split("#", 1)[0]
-        length = int(self.headers.get("Content-Length", 0) or 0)
-        body = self.rfile.read(length) if length else b""
         stamp = time.strftime("%H:%M:%S")
         agent = (self.headers.get("User-Agent", "-"))[:70]
         try:
@@ -361,7 +355,8 @@ class GuideHandler(SimpleHTTPRequestHandler):
                 fh.write(line + "\n")
         except OSError:
             pass
-        self.log_request(204)
+
+    def _send_beacon_response(self):
         try:
             self.send_response(204)
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -371,12 +366,25 @@ class GuideHandler(SimpleHTTPRequestHandler):
         except BrokenPipeError:
             pass
 
+    def do_POST(self):
+        """Crash-safe beacon sink: logs every POST to host-beacons.log + 204."""
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        body = self.rfile.read(length) if length else b""
+        self._record_beacon(body)
+        self._send_beacon_response()
+
     def send_head(self):
         raw_path = self.path.split("?", 1)[0].split("#", 1)[0]
         self.server.status.on_http()
         if not self._host_allowed():
             self.send_error(403, "Host not allowed")
             self._log(f"{self.command} {raw_path} -> REJECTED (host mismatch)", error=True)
+            return None
+
+        if raw_path == "/BEACON" or raw_path.startswith("/beacon/"):
+            if self.command == "GET":
+                self._record_beacon(b"")
+            self._send_beacon_response()
             return None
 
         resolved = self._resolve()
